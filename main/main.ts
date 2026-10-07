@@ -209,27 +209,43 @@ async function getCaptureDate(filePath: string, fileType: MediaType, fallbackDat
 async function listMediaFiles(
   folderPaths: string[],
   onProgress: (loaded: number, total: number | null) => void = () => { },
+  recursive = false,
 ): Promise<MediaFile[]> {
   const candidates: Array<{ name: string; path: string; type: MediaType; folder: string }> = []
 
   onProgress(0, null)
   for (const folderPath of folderPaths) {
-    try {
-      const folderStat = await fs.promises.stat(folderPath)
-      if (!folderStat.isDirectory()) continue
+    const pendingFolders = [folderPath]
 
-      const files = await fs.promises.readdir(folderPath, { withFileTypes: true })
+    while (pendingFolders.length > 0) {
+      const currentFolder = pendingFolders.pop()!
 
-      for (const file of files) {
-        if (!file.isFile()) continue
+      try {
+        const folderStat = await fs.promises.stat(currentFolder)
+        if (!folderStat.isDirectory()) continue
 
-        const type = getMediaType(file.name)
-        if (!type) continue
+        const entries = await fs.promises.readdir(currentFolder, { withFileTypes: true })
 
-        candidates.push({ name: file.name, path: path.join(folderPath, file.name), type, folder: folderPath })
+        for (const entry of entries) {
+          if (entry.isDirectory()) {
+            if (recursive) pendingFolders.push(path.join(currentFolder, entry.name))
+            continue
+          }
+          if (!entry.isFile()) continue
+
+          const type = getMediaType(entry.name)
+          if (!type) continue
+
+          candidates.push({
+            name: entry.name,
+            path: path.join(currentFolder, entry.name),
+            type,
+            folder: currentFolder,
+          })
+        }
+      } catch (error) {
+        console.error(`Error leyendo la carpeta ${currentFolder}:`, error)
       }
-    } catch (error) {
-      console.error(`Error leyendo la carpeta ${folderPath}:`, error)
     }
   }
 
@@ -278,16 +294,42 @@ function validateFolderPaths(folderPaths: unknown): folderPaths is string[] {
   return Array.isArray(folderPaths) && folderPaths.every((folderPath) => typeof folderPath === 'string')
 }
 
-ipcMain.handle('get-media-files', async (event, folderPaths: unknown) => {
+ipcMain.handle('get-media-files', async (event, folderPaths: unknown, recursive: unknown) => {
   if (!validateFolderPaths(folderPaths)) {
     throw new TypeError('La lista de carpetas multimedia no es válida.')
+  }
+  if (recursive !== undefined && typeof recursive !== 'boolean') {
+    throw new TypeError('El modo de exploración multimedia no es válido.')
   }
 
   return listMediaFiles(folderPaths, (loaded, total) => {
     if (!event.sender.isDestroyed()) {
       event.sender.send('media-load-progress', { loaded, total })
     }
-  })
+  }, recursive === true)
+})
+
+ipcMain.handle('get-subfolders', async (_event, folderPaths: unknown) => {
+  if (!validateFolderPaths(folderPaths) || folderPaths.some((folderPath) => !path.isAbsolute(folderPath))) {
+    throw new TypeError('La lista de carpetas para explorar no es válida.')
+  }
+
+  const subfolders = await Promise.all(
+    folderPaths.map(async (folderPath) => {
+      const entries = await fs.promises.readdir(folderPath, { withFileTypes: true })
+      return entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => ({
+          name: entry.name,
+          path: path.join(folderPath, entry.name),
+          parentPath: folderPath,
+        }))
+    }),
+  )
+
+  return subfolders
+    .flat()
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }))
 })
 
 ipcMain.handle('get-folder-summaries', async (_event, folderPaths: unknown) => {

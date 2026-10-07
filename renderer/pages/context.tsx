@@ -5,6 +5,7 @@ import {
   CalendarDays,
   AlignCenter,
   ExternalLink,
+  Folder,
   FolderOpen,
   Image as ImageIcon,
   LayoutGrid,
@@ -13,6 +14,7 @@ import {
   Search,
   X,
 } from 'lucide-react'
+import Link from 'next/link'
 import { useRouter } from 'next/router'
 import { AppHeader } from '../components/app-header'
 import { useI18n } from '../components/language-provider'
@@ -27,10 +29,47 @@ interface MediaFile {
   date: string
 }
 
+interface Subfolder {
+  name: string
+  path: string
+  parentPath: string
+}
+
 type MediaFilter = 'all' | MediaFile['type']
 type ViewMode = 'grid' | 'rows' | 'centeredRows'
+type BrowseView = 'content' | 'folders'
 
 const MEDIA_BATCH_SIZE = 60
+
+function getFolderName(folderPath: string) {
+  return folderPath.split(/[\\/]/).filter(Boolean).pop() || folderPath
+}
+
+function getFolderBreadcrumbs(rootPath: string, currentPath: string) {
+  const root = rootPath.replace(/[\\/]+$/, '')
+  const current = currentPath.replace(/[\\/]+$/, '')
+  const separator = rootPath.includes('\\') ? '\\' : '/'
+  const normalizedRoot = root.toLocaleLowerCase()
+  const normalizedCurrent = current.toLocaleLowerCase()
+
+  if (
+    normalizedCurrent !== normalizedRoot &&
+    !normalizedCurrent.startsWith(`${normalizedRoot}${separator}`)
+  ) {
+    return []
+  }
+
+  const breadcrumbs = [{ name: getFolderName(root), path: rootPath }]
+  const relativePath = current.slice(root.length).split(/[\\/]/).filter(Boolean)
+  let path = root
+
+  for (const name of relativePath) {
+    path = `${path}${path.endsWith(separator) ? '' : separator}${name}`
+    breadcrumbs.push({ name, path })
+  }
+
+  return breadcrumbs
+}
 
 const MEDIA_ICONS: Record<MediaFile['type'], IconType> = {
   image: FiImage,
@@ -55,6 +94,10 @@ export default function ContentPage() {
   const router = useRouter()
   const { locale, t } = useI18n()
   const [files, setFiles] = useState<MediaFile[]>([])
+  const [subfolders, setSubfolders] = useState<Subfolder[]>([])
+  const [folderLoadFailed, setFolderLoadFailed] = useState(false)
+  const [browseView, setBrowseView] = useState<BrowseView>('content')
+  const [showAllContent, setShowAllContent] = useState(false)
   const [filter, setFilter] = useState<MediaFilter>('all')
   const [nameQuery, setNameQuery] = useState('')
   const [extensionFilter, setExtensionFilter] = useState('all')
@@ -75,7 +118,12 @@ export default function ContentPage() {
   const lightboxImageRef = useRef<HTMLImageElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const [playbackErrors, setPlaybackErrors] = useState<Record<string, string>>({})
-  const { folders, title } = router.query
+  const { folders, title, root } = router.query
+
+  useEffect(() => {
+    setBrowseView('content')
+    setNameQuery('')
+  }, [folders])
 
   useEffect(() => {
     try {
@@ -139,6 +187,8 @@ export default function ContentPage() {
     if (!router.isReady) return
     if (!folders) {
       setFiles([])
+      setSubfolders([])
+      setFolderLoadFailed(false)
       setLoading(false)
       setMediaProgress(null)
       return
@@ -146,6 +196,8 @@ export default function ContentPage() {
 
     let active = true
     setFiles([])
+    setSubfolders([])
+    setFolderLoadFailed(false)
     setMediaProgress({ loaded: 0, total: null })
     setVisibleCount(MEDIA_BATCH_SIZE)
     const unsubscribe = window.electronAPI?.onMediaLoadProgress((progress) => {
@@ -160,8 +212,18 @@ export default function ContentPage() {
           throw new Error('La lista de carpetas no tiene un formato válido.')
         }
         if (window.electronAPI) {
-          const result = await window.electronAPI.getMediaFiles(parsedFolders)
-          if (active) setFiles(result)
+          const [result, childFolders] = await Promise.all([
+            window.electronAPI.getMediaFiles(parsedFolders, showAllContent),
+            window.electronAPI.getSubfolders(parsedFolders).catch((error: unknown) => {
+              console.error('No se pudieron cargar las subcarpetas:', error)
+              if (active) setFolderLoadFailed(true)
+              return []
+            }),
+          ])
+          if (active) {
+            setFiles(result)
+            setSubfolders(childFolders)
+          }
         }
       } catch (error) {
         console.error('Error al cargar los archivos multimedia:', error)
@@ -179,7 +241,34 @@ export default function ContentPage() {
       active = false
       unsubscribe?.()
     }
-  }, [folders, router.isReady])
+  }, [folders, router.isReady, showAllContent])
+
+  const visibleSubfolders = useMemo(() => {
+    const normalizedQuery = nameQuery.trim().toLocaleLowerCase(locale)
+    return subfolders.filter((folder) => folder.name.toLocaleLowerCase(locale).includes(normalizedQuery))
+  }, [locale, nameQuery, subfolders])
+
+  const folderPaths = useMemo(() => {
+    if (!folders) return []
+    try {
+      const parsedFolders: string[] = JSON.parse(Array.isArray(folders) ? folders[0] : folders)
+      return Array.isArray(parsedFolders) && parsedFolders.every((folder) => typeof folder === 'string')
+        ? parsedFolders
+        : []
+    } catch (error) {
+      console.error('La lista de carpetas no tiene un formato válido:', error)
+      return []
+    }
+  }, [folders])
+  const currentFolderPath = folderPaths.length === 1 ? folderPaths[0] : null
+  const rootFolderPath =
+    (typeof root === 'string' ? root : Array.isArray(root) ? root[0] : undefined) ??
+    (currentFolderPath ?? undefined)
+  const breadcrumbs =
+    currentFolderPath && rootFolderPath
+      ? getFolderBreadcrumbs(rootFolderPath, currentFolderPath)
+      : []
+  const pageTitle = typeof title === 'string' && title !== '__all__' ? title : t('galleryTitle')
 
   const filteredFiles = useMemo(() => {
     const normalizedNameQuery = nameQuery.trim().toLocaleLowerCase(locale)
@@ -217,8 +306,6 @@ export default function ContentPage() {
       : mediaProgress.total === 0
         ? 100
         : Math.min(100, Math.floor((mediaProgress.loaded / mediaProgress.total) * 100))
-  const pageTitle = typeof title === 'string' && title !== '__all__' ? title : t('galleryTitle')
-
   useEffect(() => {
     setVisibleCount(MEDIA_BATCH_SIZE)
   }, [dateFrom, dateTo, extensionFilter, filter, files, nameQuery])
@@ -327,7 +414,72 @@ export default function ContentPage() {
         backHref="/home"
       />
 
-      <section aria-label={t('mediaFilesLabel')}>
+      {breadcrumbs.length > 1 && (
+        <nav className="folder-breadcrumbs" aria-label={t('folderBreadcrumbs')}>
+          {breadcrumbs.map((breadcrumb, index) => (
+            <span className="folder-breadcrumb-item" key={breadcrumb.path}>
+              {index > 0 && <span aria-hidden="true">/</span>}
+              {index === breadcrumbs.length - 1 ? (
+                <span aria-current="page">{breadcrumb.name}</span>
+              ) : (
+                <Link
+                  href={{
+                    pathname: '/context',
+                    query: {
+                      folders: JSON.stringify([breadcrumb.path]),
+                      title: breadcrumb.name,
+                      root: rootFolderPath,
+                    },
+                  }}
+                >
+                  {breadcrumb.name}
+                </Link>
+              )}
+            </span>
+          ))}
+        </nav>
+      )}
+
+      {subfolders.length > 0 && (
+        <div className="browse-view-tabs" role="group" aria-label={t('displayMode')}>
+          <button
+            className={`browse-view-tab${browseView === 'content' ? ' active' : ''}`}
+            type="button"
+            aria-pressed={browseView === 'content'}
+            onClick={() => setBrowseView('content')}
+          >
+            {t('contentView')}
+          </button>
+          <button
+            className={`browse-view-tab${browseView === 'folders' ? ' active' : ''}`}
+            type="button"
+            aria-pressed={browseView === 'folders'}
+            onClick={() => setBrowseView('folders')}
+          >
+            {t('foldersView')}
+            <span>{subfolders.length}</span>
+          </button>
+        </div>
+      )}
+
+      <div className="browse-search-controls">
+        <label className="media-search">
+          <Search size={16} />
+          <input
+            type="search"
+            value={nameQuery}
+            onChange={(event) => setNameQuery(event.target.value)}
+            placeholder={t('searchByName')}
+            aria-label={t('searchByName')}
+          />
+        </label>
+      </div>
+
+      <section
+        className="media-content-view"
+        aria-label={t('mediaFilesLabel')}
+        hidden={browseView !== 'content'}
+      >
         <div className="media-toolbar">
           <div className="media-heading">
             <span className="count-badge">{counts.all}</span>
@@ -393,16 +545,14 @@ export default function ContentPage() {
         </div>
 
         <div className="media-search-controls">
-          <label className="media-search">
-            <Search size={16} />
-            <input
-              type="search"
-              value={nameQuery}
-              onChange={(event) => setNameQuery(event.target.value)}
-              placeholder={t('searchByName')}
-              aria-label={t('searchByName')}
-            />
-          </label>
+          <button
+            className={`filter-button all-content-toggle${showAllContent ? ' active' : ''}`}
+            type="button"
+            onClick={() => setShowAllContent((enabled) => !enabled)}
+            aria-pressed={showAllContent}
+          >
+            {t('showAllContent')}
+          </button>
           <select
             className="extension-select"
             value={extensionFilter}
@@ -449,6 +599,12 @@ export default function ContentPage() {
             </button>
           )}
         </div>
+
+        {folderLoadFailed && (
+          <p className="folder-load-error" role="alert">
+            {t('folderLoadFailed')}
+          </p>
+        )}
 
         {loading ? (
           <div className="empty-state">
@@ -586,6 +742,61 @@ export default function ContentPage() {
           </div>
         )}
       </section>
+
+      {subfolders.length > 0 && (
+        <section
+          className="browse-folders-view"
+          aria-label={t('foldersView')}
+          hidden={browseView !== 'folders'}
+        >
+          <div className="section-heading">
+            <div className="section-heading-copy">
+              <span className="count-badge">{visibleSubfolders.length}</span>
+              <div>
+                <h2>{t('subfoldersHeading')}</h2>
+              </div>
+            </div>
+          </div>
+          {visibleSubfolders.length === 0 ? (
+            <div className="empty-state compact-empty-state">
+              <span className="empty-icon">
+                <FolderOpen size={23} />
+              </span>
+              <h2>{t('noFolderResults')}</h2>
+            </div>
+          ) : (
+            <div className="folder-list">
+              {visibleSubfolders.map((folder) => {
+                const folderRoot = rootFolderPath ?? folder.parentPath
+
+                return (
+                  <article className="folder-card" key={folder.path}>
+                    <Link
+                      className="folder-main"
+                      href={{
+                        pathname: '/context',
+                        query: {
+                          folders: JSON.stringify([folder.path]),
+                          title: folder.name,
+                          root: folderRoot,
+                        },
+                      }}
+                    >
+                      <span className="folder-icon">
+                        <Folder size={19} />
+                      </span>
+                      <span className="folder-details">
+                        <span className="folder-name">{folder.name}</span>
+                        <span className="folder-path">{folder.path}</span>
+                      </span>
+                    </Link>
+                  </article>
+                )
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
       {selectedImage && (
         <div

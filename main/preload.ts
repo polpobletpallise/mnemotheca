@@ -4,7 +4,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   getSpecialFolders: () => ipcRenderer.invoke('get-special-folders'),
   openLocation: (targetPath: string) => ipcRenderer.invoke('open-location', targetPath),
-  getMediaFiles: (folders: string[]) => ipcRenderer.invoke('get-media-files', folders),
+  getMediaFiles: (folders: string[], recursive?: boolean) =>
+    ipcRenderer.invoke('get-media-files', folders, recursive),
+  getSubfolders: (folders: string[]) => ipcRenderer.invoke('get-subfolders', folders),
   getFolderSummaries: (folders: string[]) => ipcRenderer.invoke('get-folder-summaries', folders),
   changeZoom: async (direction: 'in' | 'out') => {
     const zoomFactor: unknown = await ipcRenderer.invoke('change-zoom', direction)

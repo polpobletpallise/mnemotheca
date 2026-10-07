@@ -245,7 +245,7 @@ export default function HomePage() {
                     className="folder-main"
                     href={{
                       pathname: '/context',
-                      query: { folders: JSON.stringify([folder]), title: folderName },
+                      query: { folders: JSON.stringify([folder]), title: folderName, root: folder },
                     }}
                   >
                     <span

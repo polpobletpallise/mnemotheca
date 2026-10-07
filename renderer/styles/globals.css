@@ -330,6 +330,78 @@ a:focus-visible {
   margin-bottom: 15px;
 }
 
+.folder-breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -26px 0 27px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.folder-breadcrumb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.folder-breadcrumb-item a:hover,
+.folder-breadcrumb-item [aria-current='page'] {
+  color: var(--foreground);
+}
+
+.folder-load-error {
+  margin: 0 0 16px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.browse-view-tabs {
+  display: flex;
+  gap: 7px;
+  margin: 0 0 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.browse-view-tab {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 620;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.browse-view-tab:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+.browse-view-tab.active {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.browse-view-tab span {
+  color: var(--subtle);
+  font-size: 10px;
+}
+
+.media-content-view[hidden],
+.browse-folders-view[hidden] {
+  display: none;
+}
+
 .section-heading-copy {
   gap: 11px;
 }
@@ -567,6 +639,10 @@ a:focus-visible {
   text-align: center;
 }
 
+.compact-empty-state {
+  min-height: 180px;
+}
+
 .empty-icon {
   display: grid;
   width: 52px;
@@ -713,9 +789,22 @@ a:focus-visible {
   font-size: 10px;
 }
 
+.all-content-toggle {
+  min-height: 38px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+}
+
+.browse-search-controls {
+  display: flex;
+  margin-bottom: 10px;
+}
+
 .media-search-controls {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 9px;
   margin: 0 0 18px;
 }

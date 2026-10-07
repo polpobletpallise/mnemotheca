@@ -11,13 +11,20 @@ declare global {
         }>
       >
       openLocation: (targetPath: string) => Promise<void>
-      getMediaFiles: (folders: string[]) => Promise<
+      getMediaFiles: (folders: string[], recursive?: boolean) => Promise<
         Array<{
           name: string
           path: string
           type: 'image' | 'video' | 'audio'
           folder: string
           date: string
+        }>
+      >
+      getSubfolders: (folders: string[]) => Promise<
+        Array<{
+          name: string
+          path: string
+          parentPath: string
         }>
       >
       onMediaLoadProgress: (
