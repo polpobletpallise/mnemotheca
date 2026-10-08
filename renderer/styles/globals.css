@@ -398,7 +398,8 @@ a:focus-visible {
 }
 
 .media-content-view[hidden],
-.browse-folders-view[hidden] {
+.browse-folders-view[hidden],
+.browse-years-view[hidden] {
   display: none;
 }
 
@@ -798,7 +799,14 @@ a:focus-visible {
 
 .browse-search-controls {
   display: flex;
+  align-items: center;
+  gap: 9px;
   margin-bottom: 10px;
+}
+
+.date-sort-button {
+  min-height: 38px;
+  flex: 0 0 auto;
 }
 
 .media-search-controls {
@@ -877,10 +885,18 @@ a:focus-visible {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.clear-date-filter {
+.clear-filter {
   min-height: 38px;
   padding: 0 11px;
   white-space: nowrap;
+}
+
+.year-folder-card {
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .media-grid {
@@ -1341,6 +1357,11 @@ a:focus-visible {
   }
 
   .media-search-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .browse-search-controls {
     align-items: stretch;
     flex-direction: column;
   }

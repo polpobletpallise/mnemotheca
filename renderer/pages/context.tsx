@@ -12,6 +12,9 @@ import {
   List,
   LoaderCircle,
   Search,
+  ArrowDownWideNarrow,
+  ArrowUpDown,
+  ArrowUpWideNarrow,
   X,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -37,7 +40,8 @@ interface Subfolder {
 
 type MediaFilter = 'all' | MediaFile['type']
 type ViewMode = 'grid' | 'rows' | 'centeredRows'
-type BrowseView = 'content' | 'folders'
+type BrowseView = 'content' | 'folders' | 'years'
+type DateSort = 'default' | 'ascending' | 'descending'
 
 const MEDIA_BATCH_SIZE = 60
 
@@ -90,6 +94,11 @@ function getLocalDateValue(dateString: string) {
   return `${date.getFullYear()}-${month}-${day}`
 }
 
+function getFileYear(dateString: string) {
+  const date = new Date(dateString)
+  return Number.isNaN(date.getTime()) ? null : date.getFullYear()
+}
+
 export default function ContentPage() {
   const router = useRouter()
   const { locale, t } = useI18n()
@@ -97,12 +106,14 @@ export default function ContentPage() {
   const [subfolders, setSubfolders] = useState<Subfolder[]>([])
   const [folderLoadFailed, setFolderLoadFailed] = useState(false)
   const [browseView, setBrowseView] = useState<BrowseView>('content')
-  const [showAllContent, setShowAllContent] = useState(false)
+  const [showAllContent, setShowAllContent] = useState(true)
   const [filter, setFilter] = useState<MediaFilter>('all')
   const [nameQuery, setNameQuery] = useState('')
   const [extensionFilter, setExtensionFilter] = useState('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [dateSort, setDateSort] = useState<DateSort>('default')
+  const [selectedYear, setSelectedYear] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [mediaProgress, setMediaProgress] = useState<{ loaded: number; total: number | null } | null>(null)
   const [visibleCount, setVisibleCount] = useState(MEDIA_BATCH_SIZE)
@@ -122,6 +133,7 @@ export default function ContentPage() {
 
   useEffect(() => {
     setBrowseView('content')
+    setSelectedYear(null)
     setNameQuery('')
   }, [folders])
 
@@ -272,16 +284,44 @@ export default function ContentPage() {
 
   const filteredFiles = useMemo(() => {
     const normalizedNameQuery = nameQuery.trim().toLocaleLowerCase(locale)
-    return files.filter((file) => {
+    const matchingFiles = files.filter((file) => {
       const matchesType = filter === 'all' || file.type === filter
       const matchesName = file.name.toLocaleLowerCase(locale).includes(normalizedNameQuery)
       const matchesExtension = extensionFilter === 'all' || getFileExtension(file.name) === extensionFilter
       const fileDate = getLocalDateValue(file.date)
+      const matchesYear = selectedYear === null || getFileYear(file.date) === selectedYear
       const matchesDateFrom = !dateFrom || (fileDate !== '' && fileDate >= dateFrom)
       const matchesDateTo = !dateTo || (fileDate !== '' && fileDate <= dateTo)
-      return matchesType && matchesName && matchesExtension && matchesDateFrom && matchesDateTo
+      return matchesType && matchesName && matchesExtension && matchesYear && matchesDateFrom && matchesDateTo
     })
-  }, [dateFrom, dateTo, extensionFilter, files, filter, locale, nameQuery])
+    if (dateSort === 'default') return matchingFiles
+
+    return matchingFiles.sort((first, second) => {
+      const firstTime = new Date(first.date).getTime()
+      const secondTime = new Date(second.date).getTime()
+      const firstHasDate = Number.isFinite(firstTime)
+      const secondHasDate = Number.isFinite(secondTime)
+      if (!firstHasDate || !secondHasDate) {
+        if (firstHasDate === secondHasDate) return 0
+        return firstHasDate ? -1 : 1
+      }
+      return dateSort === 'ascending' ? firstTime - secondTime : secondTime - firstTime
+    })
+  }, [dateFrom, dateSort, dateTo, extensionFilter, files, filter, locale, nameQuery, selectedYear])
+  const yearFolders = useMemo(() => {
+    const countsByYear = new Map<number, number>()
+    for (const file of files) {
+      const year = getFileYear(file.date)
+      if (year !== null) countsByYear.set(year, (countsByYear.get(year) ?? 0) + 1)
+    }
+    return [...countsByYear.entries()]
+      .sort(([firstYear], [secondYear]) => secondYear - firstYear)
+      .map(([year, count]) => ({ year, count }))
+  }, [files])
+  const visibleYearFolders = useMemo(() => {
+    const normalizedQuery = nameQuery.trim().toLocaleLowerCase(locale)
+    return yearFolders.filter(({ year }) => String(year).includes(normalizedQuery))
+  }, [locale, nameQuery, yearFolders])
   const extensions = useMemo(() => {
     const availableExtensions = new Set(files.map((file) => getFileExtension(file.name)))
     return Object.values(MEDIA_FORMATS)
@@ -308,7 +348,7 @@ export default function ContentPage() {
         : Math.min(100, Math.floor((mediaProgress.loaded / mediaProgress.total) * 100))
   useEffect(() => {
     setVisibleCount(MEDIA_BATCH_SIZE)
-  }, [dateFrom, dateTo, extensionFilter, filter, files, nameQuery])
+  }, [dateFrom, dateSort, dateTo, extensionFilter, filter, files, nameQuery, selectedYear])
 
   useEffect(() => {
     if (loading || visibleCount >= filteredFiles.length || !loadMoreRef.current) return
@@ -440,25 +480,47 @@ export default function ContentPage() {
         </nav>
       )}
 
-      {subfolders.length > 0 && (
+      {(subfolders.length > 0 || yearFolders.length > 0) && (
         <div className="browse-view-tabs" role="group" aria-label={t('displayMode')}>
           <button
             className={`browse-view-tab${browseView === 'content' ? ' active' : ''}`}
             type="button"
             aria-pressed={browseView === 'content'}
-            onClick={() => setBrowseView('content')}
+            onClick={() => {
+              setSelectedYear(null)
+              setBrowseView('content')
+            }}
           >
             {t('contentView')}
           </button>
-          <button
-            className={`browse-view-tab${browseView === 'folders' ? ' active' : ''}`}
-            type="button"
-            aria-pressed={browseView === 'folders'}
-            onClick={() => setBrowseView('folders')}
-          >
-            {t('foldersView')}
-            <span>{subfolders.length}</span>
-          </button>
+          {subfolders.length > 0 && (
+            <button
+              className={`browse-view-tab${browseView === 'folders' ? ' active' : ''}`}
+              type="button"
+              aria-pressed={browseView === 'folders'}
+              onClick={() => {
+                setSelectedYear(null)
+                setBrowseView('folders')
+              }}
+            >
+              {t('foldersView')}
+              <span>{subfolders.length}</span>
+            </button>
+          )}
+          {yearFolders.length > 0 && (
+            <button
+              className={`browse-view-tab${browseView === 'years' ? ' active' : ''}`}
+              type="button"
+              aria-pressed={browseView === 'years'}
+              onClick={() => {
+                setSelectedYear(null)
+                setBrowseView('years')
+              }}
+            >
+              {t('yearsView')}
+              <span>{yearFolders.length}</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -473,19 +535,55 @@ export default function ContentPage() {
             aria-label={t('searchByName')}
           />
         </label>
+        <button
+          className="filter-button date-sort-button"
+          type="button"
+          onClick={() =>
+            setDateSort((current) =>
+              current === 'default' ? 'ascending' : current === 'ascending' ? 'descending' : 'default',
+            )
+          }
+          aria-label={t('sortByDate')}
+          title={t(
+            dateSort === 'ascending'
+              ? 'dateSortAscending'
+              : dateSort === 'descending'
+                ? 'dateSortDescending'
+                : 'dateSortDefault',
+          )}
+        >
+          {dateSort === 'ascending' ? (
+            <ArrowUpWideNarrow size={15} />
+          ) : dateSort === 'descending' ? (
+            <ArrowDownWideNarrow size={15} />
+          ) : (
+            <ArrowUpDown size={15} />
+          )}
+          {t(
+            dateSort === 'ascending'
+              ? 'dateSortAscending'
+              : dateSort === 'descending'
+                ? 'dateSortDescending'
+                : 'dateSortDefault',
+          )}
+        </button>
       </div>
 
       <section
         className="media-content-view"
         aria-label={t('mediaFilesLabel')}
-        hidden={browseView !== 'content'}
+        hidden={browseView !== 'content' && !(browseView === 'years' && selectedYear !== null)}
       >
         <div className="media-toolbar">
           <div className="media-heading">
-            <span className="count-badge">{counts.all}</span>
+            <span className="count-badge">{selectedYear === null ? counts.all : filteredFiles.length}</span>
             <div>
-              <h2>{t('filesHeading')}</h2>
-              <p>{loading ? t('searchingContent') : t('itemsInLibrary', { count: counts.all })}</p>
+              <h2>{selectedYear === null ? t('filesHeading') : t('yearContentsHeading', { year: selectedYear })}</h2>
+              <p>
+                {loading
+                  ? t('searchingContent')
+                  : t('itemsInLibrary', { count: selectedYear === null ? counts.all : filteredFiles.length })}
+              </p>
             </div>
           </div>
 
@@ -586,16 +684,19 @@ export default function ContentPage() {
               aria-label={t('dateTo')}
             />
           </label>
-          {(dateFrom || dateTo) && (
+          {(filter !== 'all' || nameQuery || extensionFilter !== 'all' || dateFrom || dateTo) && (
             <button
-              className="secondary-button clear-date-filter"
+              className="secondary-button clear-filter"
               type="button"
               onClick={() => {
+                setFilter('all')
+                setNameQuery('')
+                setExtensionFilter('all')
                 setDateFrom('')
                 setDateTo('')
               }}
             >
-              {t('clearDateFilters')}
+              {t('clearFilters')}
             </button>
           )}
         </div>
@@ -793,6 +894,55 @@ export default function ContentPage() {
                   </article>
                 )
               })}
+            </div>
+          )}
+        </section>
+      )}
+
+      {yearFolders.length > 0 && (
+        <section
+          className="browse-years-view"
+          aria-label={t('yearsView')}
+          hidden={browseView !== 'years' || selectedYear !== null}
+        >
+          <div className="section-heading">
+            <div className="section-heading-copy">
+              <span className="count-badge">{visibleYearFolders.length}</span>
+              <div>
+                <h2>{t('yearFoldersHeading')}</h2>
+              </div>
+            </div>
+          </div>
+          {visibleYearFolders.length === 0 ? (
+            <div className="empty-state compact-empty-state">
+              <span className="empty-icon">
+                <FolderOpen size={23} />
+              </span>
+              <h2>{t('noYearResults')}</h2>
+            </div>
+          ) : (
+            <div className="folder-list">
+              {visibleYearFolders.map(({ year, count }) => (
+                <button
+                  className="folder-card year-folder-card"
+                  key={year}
+                  type="button"
+                  onClick={() => {
+                    setNameQuery('')
+                    setSelectedYear(year)
+                  }}
+                >
+                  <span className="folder-main">
+                    <span className="folder-icon">
+                      <Folder size={19} />
+                    </span>
+                    <span className="folder-details">
+                      <span className="folder-name">{year}</span>
+                      <span className="folder-path">{t('itemsInLibrary', { count })}</span>
+                    </span>
+                  </span>
+                </button>
+              ))}
             </div>
           )}
         </section>

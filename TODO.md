@@ -1,6 +1,6 @@
 # 🏛️ Mnemotheca — TODO & Roadmap
 
-Estado actual: v1.4.0
+Estado actual: v1.5.0
 
 Mnemotheca is a privacy-first desktop gallery for personal media libraries. The current focus is on local browsing, folder management, and polished browsing workflows without cloud dependency.
 

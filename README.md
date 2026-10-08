@@ -32,7 +32,7 @@ Connect the folders that matter to you and build a curated library around your e
 Explore media in a clean, intentional flow that helps you review content quickly and revisit collections with ease.
 
 ### Nested folder browsing
-Open a library folder to browse its subfolders one level at a time, or switch between separate content and folder views. Search for files and subfolders, use the folder breadcrumb to return to any parent location, and enable “Show all content” to include media from every nested folder.
+Open a library folder to browse its subfolders one level at a time, or switch between content, folder, and year views. “Show all content” is enabled by default to include media from every nested folder. Search for files and subfolders, sort media by date, and use the folder breadcrumb to return to any parent location.
 
 ### Privacy and control
 Mnemotheca processes media locally and keeps your selections and preferences on your device. Your library remains under your control.
