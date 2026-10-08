@@ -38,6 +38,16 @@ declare global {
           yearRange: string | null
         }>
       >
+      getCollections: () => Promise<Array<{ name: string; path: string; folders: string[]; files: string[] }>>
+      createCollection: (name: string) => Promise<{ name: string; path: string; folders: string[]; files: string[] }>
+      addFolderToCollection: (
+        collectionName: string,
+        folderPath: string,
+      ) => Promise<{ name: string; path: string; folders: string[]; files: string[] }>
+      addFileToCollection: (
+        collectionName: string,
+        filePath: string,
+      ) => Promise<{ name: string; path: string; folders: string[]; files: string[] }>
       changeZoom: (direction: 'in' | 'out') => Promise<number>
       onUpdateDownloadProgress: (listener: (percent: number) => void) => () => void
     }

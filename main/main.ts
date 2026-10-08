@@ -61,6 +61,122 @@ if (isProd) {
   app.setPath('userData', `${app.getPath('userData')} (development)`)
 }
 
+function getCollectionsRoot() {
+  return path.join(app.getPath('documents'), 'Mnemotheca Collections')
+}
+
+async function ensureCollectionsRoot() {
+  const root = getCollectionsRoot()
+  const documents = app.getPath('documents')
+  const rootName = path.basename(root)
+  await fs.promises.mkdir(documents, { recursive: true })
+  const entries = await fs.promises.readdir(documents, { withFileTypes: true })
+  const existingRoot = entries.find(
+    (entry) => entry.isDirectory() && entry.name.toLocaleLowerCase() === rootName.toLocaleLowerCase(),
+  )
+  if (existingRoot && existingRoot.name !== rootName) {
+    const currentPath = path.join(documents, existingRoot.name)
+    const temporaryPath = path.join(documents, `.mnemotheca-collections-${process.pid}-${Date.now()}`)
+    await fs.promises.rename(currentPath, temporaryPath)
+    try {
+      await fs.promises.rename(temporaryPath, root)
+    } catch (error) {
+      try {
+        await fs.promises.rename(temporaryPath, currentPath)
+      } catch (restoreError) {
+        console.error('Could not restore the collections folder after renaming failed:', restoreError)
+      }
+      throw error
+    }
+  }
+  await fs.promises.mkdir(path.join(root, 'Favourites'), { recursive: true })
+  try {
+    await fs.promises.access(path.join(root, 'Favourites', 'collection.json'))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    await writeCollection(root, 'Favourites', [])
+  }
+  return root
+}
+
+function validateCollectionName(name: unknown): asserts name is string {
+  if (
+    typeof name !== 'string' ||
+    name.trim() !== name ||
+    name.length === 0 ||
+    name.length > 80 ||
+    /[<>:"/\\|?*\x00-\x1f]/.test(name) ||
+    /[. ]$/.test(name) ||
+    name === '.' ||
+    name === '..' ||
+    /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)
+  ) {
+    throw new TypeError('El nombre de la colección no es válido.')
+  }
+}
+
+function getCollectionDirectory(root: string, name: string) {
+  validateCollectionName(name)
+  const directory = path.join(root, name)
+  const relativePath = path.relative(root, directory)
+  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new TypeError('La ruta de la colección no es válida.')
+  }
+  return directory
+}
+
+async function verifyCollectionDirectory(root: string, directory: string) {
+  const realRoot = await fs.promises.realpath(root)
+  const realDirectory = await fs.promises.realpath(directory)
+  const relativePath = path.relative(realRoot, realDirectory)
+  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new TypeError('La ruta de la colección no es válida.')
+  }
+}
+
+interface Collection {
+  name: string
+  path: string
+  folders: string[]
+  files: string[]
+}
+
+async function readCollection(root: string, name: string): Promise<Collection> {
+  const directory = getCollectionDirectory(root, name)
+  await verifyCollectionDirectory(root, directory)
+  const manifest = JSON.parse(await fs.promises.readFile(path.join(directory, 'collection.json'), 'utf8')) as unknown
+  if (
+    typeof manifest !== 'object' ||
+    manifest === null ||
+    !('folders' in manifest) ||
+    !Array.isArray(manifest.folders) ||
+    manifest.folders.some((folder) => typeof folder !== 'string' || !path.isAbsolute(folder)) ||
+    ('files' in manifest &&
+      (!Array.isArray(manifest.files) ||
+        manifest.files.some((file) => typeof file !== 'string' || !path.isAbsolute(file))))
+  ) {
+    throw new TypeError(`Los datos de la colección ${name} no son válidos.`)
+  }
+  return {
+    name,
+    path: directory,
+    folders: manifest.folders,
+    files: 'files' in manifest ? manifest.files as string[] : [],
+  }
+}
+
+async function writeCollection(root: string, name: string, folders: string[], files: string[] = []) {
+  const directory = getCollectionDirectory(root, name)
+  await fs.promises.mkdir(directory, { recursive: true })
+  await verifyCollectionDirectory(root, directory)
+  await fs.promises.writeFile(
+    path.join(directory, 'collection.json'),
+    `${JSON.stringify({ folders, files }, null, 2)}\n`,
+    'utf8',
+  )
+  return { name, path: directory, folders, files }
+}
+
 // Registrar el protocolo local
 app.whenReady().then(() => {
   protocol.handle('local-media', (request) => {
@@ -87,6 +203,7 @@ app.whenReady().then(() => {
 
   ; (async () => {
     await app.whenReady()
+    await ensureCollectionsRoot()
 
     if (app.isPackaged) {
       log.info('Aplicación empaquetada. Comprobando actualizaciones...')
@@ -163,6 +280,69 @@ ipcMain.handle('get-special-folders', () => {
       return []
     }
   })
+})
+
+ipcMain.handle('get-collections', async () => {
+  const root = await ensureCollectionsRoot()
+  const entries = await fs.promises.readdir(root, { withFileTypes: true })
+  const collections = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .map(async (entry) => {
+        try {
+          return await readCollection(root, entry.name)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+          throw error
+        }
+      }),
+  )
+  return collections
+    .filter((collection): collection is Collection => collection !== null)
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }))
+})
+
+ipcMain.handle('create-collection', async (_event, name: unknown) => {
+  validateCollectionName(name)
+  const root = await ensureCollectionsRoot()
+  const collections = await fs.promises.readdir(root, { withFileTypes: true })
+  if (collections.some((entry) => entry.isDirectory() && entry.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    throw new Error('Ya existe una colección con ese nombre.')
+  }
+  return writeCollection(root, name, [])
+})
+
+ipcMain.handle('add-folder-to-collection', async (_event, name: unknown, folderPath: unknown) => {
+  validateCollectionName(name)
+  if (typeof folderPath !== 'string' || !path.isAbsolute(folderPath)) {
+    throw new TypeError('La ruta de la carpeta no es válida.')
+  }
+  const root = await ensureCollectionsRoot()
+  const collection = await readCollection(root, name)
+  if (!collection.folders.includes(folderPath)) {
+    collection.folders.push(folderPath)
+    return writeCollection(root, name, collection.folders)
+  }
+  return collection
+})
+
+ipcMain.handle('add-file-to-collection', async (_event, name: unknown, filePath: unknown) => {
+  validateCollectionName(name)
+  if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) {
+    throw new TypeError('La ruta del archivo no es válida.')
+  }
+  const stat = await fs.promises.stat(filePath)
+  if (!stat.isFile() || !getMediaType(path.basename(filePath))) {
+    throw new TypeError('La ruta indicada no es un archivo multimedia compatible.')
+  }
+
+  const root = await ensureCollectionsRoot()
+  const collection = await readCollection(root, name)
+  if (!collection.files.includes(filePath)) {
+    collection.files.push(filePath)
+    return writeCollection(root, name, collection.folders, collection.files)
+  }
+  return collection
 })
 
 ipcMain.handle('open-location', async (_event, targetPath: unknown) => {

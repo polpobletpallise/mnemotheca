@@ -557,6 +557,43 @@ a:focus-visible {
   gap: 5px;
 }
 
+.content-menu-list {
+  position: fixed;
+  z-index: 1100;
+  display: grid;
+  min-width: 190px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 11px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+}
+
+.content-menu-list a,
+.content-menu-list button {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+
+.content-menu-list a:hover,
+.content-menu-list button:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
 .icon-button {
   width: 33px;
   height: 33px;
@@ -593,6 +630,135 @@ a:focus-visible {
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
   border-radius: 15px;
   background: linear-gradient(110deg, var(--accent-soft), transparent 80%), var(--surface);
+}
+
+.modal-backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  padding: 20px;
+  place-items: center;
+  background: rgb(0 0 0 / 62%);
+  backdrop-filter: blur(5px);
+}
+
+.collection-dialog {
+  width: min(100%, 480px);
+  max-height: min(720px, calc(100vh - 40px));
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+}
+
+.collection-dialog-heading,
+.collection-choice,
+.collection-choice-name {
+  display: flex;
+  align-items: center;
+}
+
+.collection-dialog-heading,
+.collection-choice {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.collection-dialog-heading {
+  margin-bottom: 17px;
+}
+
+.collection-dialog-heading h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 680;
+}
+
+.collection-dialog-heading p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.collection-choice-list {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 15px;
+}
+
+.collection-choice {
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.collection-choice-name {
+  min-width: 0;
+  gap: 9px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+}
+
+.collection-choice-name svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.collection-added {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  color: var(--success);
+  font-size: 11px;
+}
+
+.collection-add-button {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.collection-new-button {
+  min-height: 38px;
+}
+
+.collection-create-form {
+  display: flex;
+  gap: 8px;
+}
+
+.collection-create-form input {
+  min-width: 0;
+  min-height: 42px;
+  flex: 1;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 12px;
+}
+
+.collection-create-form .primary-button {
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.collection-empty {
+  margin: 0;
+  padding: 10px 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .all-folders-copy {

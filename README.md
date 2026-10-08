@@ -28,6 +28,9 @@ Browse your own files in a streamlined desktop environment, with support for the
 ### Folder-based organization
 Connect the folders that matter to you and build a curated library around your existing structure.
 
+### Collections
+Create collections to group media files and folders from your library. Mnemotheca creates a `Mnemotheca Collections` folder in Documents with a `Favourites` collection. Collections save references to original locations; they never move or copy your media.
+
 ### Context-aware browsing
 Explore media in a clean, intentional flow that helps you review content quickly and revisit collections with ease.
 

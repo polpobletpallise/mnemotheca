@@ -3,6 +3,7 @@ import Link from 'next/link'
 import {
   AlertTriangle,
   ArrowUpRight,
+  Bookmark,
   Download,
   FileText,
   ExternalLink,
@@ -60,7 +61,6 @@ export default function HomePage() {
   const [folders, setFolders] = useState<string[]>([])
   const [folderSummaries, setFolderSummaries] = useState<Record<string, FolderSummary>>({})
   const [specialFolders, setSpecialFolders] = useState<Partial<Record<SpecialFolderType, string>>>({})
-
   useEffect(() => {
     if (!window.electronAPI) return
 
@@ -72,9 +72,7 @@ export default function HomePage() {
       .catch((error: unknown) => {
         console.error('Could not load the system folder locations:', error)
       })
-  }, [])
 
-  useEffect(() => {
     try {
       const saved = localStorage.getItem('app_folders')
       if (saved) {
@@ -202,6 +200,10 @@ export default function HomePage() {
             </div>
           </div>
           <div className="section-actions">
+            <Link className="secondary-button" href="/collections">
+              <Bookmark size={16} />
+              {t('collections')}
+            </Link>
             <button className="primary-button" type="button" onClick={handleAddFolder}>
               <FolderPlus size={16} />
               {t('addFolder')}

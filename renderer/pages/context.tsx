@@ -1,16 +1,23 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent } from 'react'
+import { createPortal } from 'react-dom'
 import type { IconType } from 'react-icons'
 import { FiImage, FiMusic, FiVideo } from 'react-icons/fi'
 import {
   CalendarDays,
   AlignCenter,
+  Bookmark,
+  Check,
+  EllipsisVertical,
   ExternalLink,
+  FilePenLine,
   Folder,
   FolderOpen,
+  Heart,
   Image as ImageIcon,
   LayoutGrid,
   List,
   LoaderCircle,
+  Plus,
   Search,
   ArrowDownWideNarrow,
   ArrowUpDown,
@@ -36,6 +43,13 @@ interface Subfolder {
   name: string
   path: string
   parentPath: string
+}
+
+interface Collection {
+  name: string
+  path: string
+  folders: string[]
+  files: string[]
 }
 
 type MediaFilter = 'all' | MediaFile['type']
@@ -129,7 +143,72 @@ export default function ContentPage() {
   const lightboxImageRef = useRef<HTMLImageElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const [playbackErrors, setPlaybackErrors] = useState<Record<string, string>>({})
+  const [collections, setCollections] = useState<Collection[]>([])
+  const [openMenuFor, setOpenMenuFor] = useState<string | null>(null)
+  const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const [collectionFile, setCollectionFile] = useState<MediaFile | null>(null)
+  const [newCollectionName, setNewCollectionName] = useState('')
+  const [showNewCollection, setShowNewCollection] = useState(false)
+  const [mediaLabels, setMediaLabels] = useState<Record<string, string>>({})
   const { folders, title, root } = router.query
+
+  useEffect(() => {
+    try {
+      const savedLabels = localStorage.getItem('gallery_media_labels')
+      if (savedLabels) {
+        const parsed: unknown = JSON.parse(savedLabels)
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          setMediaLabels(
+            Object.fromEntries(
+              Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+            ),
+          )
+        }
+      }
+    } catch (error) {
+      console.error('Could not load custom media names:', error)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!collectionFile) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCollectionFile(null)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [collectionFile])
+
+  useEffect(() => {
+    if (!openMenuFor) return
+    const dismissMenu = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key === 'Escape') {
+        setOpenMenuFor(null)
+        return
+      }
+      if (
+        event instanceof window.PointerEvent &&
+        event.target instanceof Node &&
+        !menuRef.current?.contains(event.target) &&
+        !menuButtonRef.current?.contains(event.target)
+      ) {
+        setOpenMenuFor(null)
+      }
+    }
+    const dismissOnViewportChange = () => setOpenMenuFor(null)
+    document.addEventListener('pointerdown', dismissMenu)
+    document.addEventListener('keydown', dismissMenu)
+    window.addEventListener('resize', dismissOnViewportChange)
+    window.addEventListener('scroll', dismissOnViewportChange, true)
+    return () => {
+      document.removeEventListener('pointerdown', dismissMenu)
+      document.removeEventListener('keydown', dismissMenu)
+      window.removeEventListener('resize', dismissOnViewportChange)
+      window.removeEventListener('scroll', dismissOnViewportChange, true)
+    }
+  }, [openMenuFor])
 
   useEffect(() => {
     setBrowseView('content')
@@ -197,7 +276,8 @@ export default function ContentPage() {
 
   useEffect(() => {
     if (!router.isReady) return
-    if (!folders) {
+    const requestedFiles = router.query.files
+    if (!folders && !requestedFiles) {
       setFiles([])
       setSubfolders([])
       setFolderLoadFailed(false)
@@ -219,21 +299,43 @@ export default function ContentPage() {
     async function loadFiles() {
       setLoading(true)
       try {
-        const parsedFolders: string[] = JSON.parse(Array.isArray(folders) ? folders[0] : folders)
-        if (!Array.isArray(parsedFolders) || parsedFolders.some((folder) => typeof folder !== 'string')) {
+        const parsedFolders: string[] = folders
+          ? JSON.parse(Array.isArray(folders) ? folders[0] : folders)
+          : []
+        const parsedFiles: string[] = requestedFiles
+          ? JSON.parse(Array.isArray(requestedFiles) ? requestedFiles[0] : requestedFiles)
+          : []
+        if (
+          !Array.isArray(parsedFolders) ||
+          parsedFolders.some((folder) => typeof folder !== 'string') ||
+          !Array.isArray(parsedFiles) ||
+          parsedFiles.some((file) => typeof file !== 'string')
+        ) {
           throw new Error('La lista de carpetas no tiene un formato válido.')
         }
         if (window.electronAPI) {
+          const fileFolders = [...new Set(parsedFiles.map((file) => file.slice(0, Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\')))))]
           const [result, childFolders] = await Promise.all([
-            window.electronAPI.getMediaFiles(parsedFolders, showAllContent),
-            window.electronAPI.getSubfolders(parsedFolders).catch((error: unknown) => {
+            Promise.all([
+              parsedFolders.length ? window.electronAPI.getMediaFiles(parsedFolders, showAllContent) : Promise.resolve([]),
+              fileFolders.length ? window.electronAPI.getMediaFiles(fileFolders, false) : Promise.resolve([]),
+            ]),
+            parsedFolders.length ? window.electronAPI.getSubfolders(parsedFolders).catch((error: unknown) => {
               console.error('No se pudieron cargar las subcarpetas:', error)
               if (active) setFolderLoadFailed(true)
               return []
-            }),
+            }) : Promise.resolve([]),
           ])
           if (active) {
-            setFiles(result)
+            const allowedFolders = parsedFolders.map((folder) => folder.replace(/[\\/]+$/, '').toLocaleLowerCase())
+            const allowedFiles = new Set(parsedFiles.map((file) => file.toLocaleLowerCase()))
+            const uniqueFiles = new Map([...result[0], ...result[1]].map((file) => [file.path, file]))
+            setFiles([...uniqueFiles.values()].filter((file) => {
+              const normalizedFile = file.path.toLocaleLowerCase()
+              return allowedFiles.has(normalizedFile) || allowedFolders.some((folder) =>
+                normalizedFile.startsWith(`${folder}${file.path.includes('\\') ? '\\' : '/'}`),
+              )
+            }))
             setSubfolders(childFolders)
           }
         }
@@ -253,7 +355,7 @@ export default function ContentPage() {
       active = false
       unsubscribe?.()
     }
-  }, [folders, router.isReady, showAllContent])
+  }, [folders, router.isReady, router.query.files, showAllContent])
 
   const visibleSubfolders = useMemo(() => {
     const normalizedQuery = nameQuery.trim().toLocaleLowerCase(locale)
@@ -401,6 +503,89 @@ export default function ContentPage() {
       console.error(`Could not open file location ${filePath}:`, error)
       window.alert(t('openLocationFailed'))
     }
+  }
+
+  const toggleContentMenu = (file: MediaFile, button: HTMLButtonElement) => {
+    if (openMenuFor === file.path) {
+      setOpenMenuFor(null)
+      return
+    }
+    const bounds = button.getBoundingClientRect()
+    setMenuPosition({
+      top: Math.min(bounds.bottom + 6, Math.max(8, window.innerHeight - 132)),
+      right: Math.max(8, window.innerWidth - bounds.right),
+    })
+    menuButtonRef.current = button
+    setOpenMenuFor(file.path)
+  }
+
+  const handleRenameMedia = (file: MediaFile, defaultName: string) => {
+    const nextName = window.prompt(t('renameMediaPrompt'), mediaLabels[file.path] ?? defaultName)?.trim()
+    if (!nextName || nextName === (mediaLabels[file.path] ?? defaultName)) return
+    const nextLabels = { ...mediaLabels, [file.path]: nextName }
+    try {
+      localStorage.setItem('gallery_media_labels', JSON.stringify(nextLabels))
+      setMediaLabels(nextLabels)
+    } catch (error) {
+      console.error(`Could not save a custom name for ${file.path}:`, error)
+      window.alert(t('mediaRenameFailed'))
+    }
+  }
+
+  const handleShowCollectionPicker = async (file: MediaFile) => {
+    if (!window.electronAPI) return
+    try {
+      setCollections(await window.electronAPI.getCollections())
+      setCollectionFile(file)
+      setShowNewCollection(false)
+      setNewCollectionName('')
+      setOpenMenuFor(null)
+    } catch (error) {
+      console.error('Could not load collections:', error)
+      window.alert(t('collectionLoadFailed'))
+    }
+  }
+
+  const handleAddMediaToCollection = async (collectionName: string) => {
+    if (!collectionFile || !window.electronAPI) return
+    try {
+      const updated = await window.electronAPI.addFileToCollection(collectionName, collectionFile.path)
+      setCollections((current) => current.map((item) => item.name === updated.name ? updated : item))
+    } catch (error) {
+      console.error(`Could not add ${collectionFile.path} to collection ${collectionName}:`, error)
+      window.alert(t('collectionAddFailed'))
+    }
+  }
+
+  const handleCreateCollection = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const name = newCollectionName.trim()
+    if (!name) {
+      window.alert(t('collectionNameRequired'))
+      return
+    }
+    if (!window.electronAPI) return
+    let created: Collection
+    try {
+      created = await window.electronAPI.createCollection(name)
+    } catch (error) {
+      console.error(`Could not create collection ${name}:`, error)
+      window.alert(t('collectionCreateFailed'))
+      return
+    }
+    setCollections((current) => [...current.filter((item) => item.name !== created.name), created])
+    if (collectionFile) {
+      try {
+        const updated = await window.electronAPI.addFileToCollection(created.name, collectionFile.path)
+        setCollections((current) => current.map((item) => item.name === updated.name ? updated : item))
+      } catch (error) {
+        console.error(`Could not add ${collectionFile.path} to newly created collection ${name}:`, error)
+        window.alert(t('collectionAddFailed'))
+        return
+      }
+    }
+    setNewCollectionName('')
+    setShowNewCollection(false)
   }
 
   const resetImageTransform = () => {
@@ -762,7 +947,8 @@ export default function ContentPage() {
               const srcUrl = `local-media://media/${encodeURIComponent(file.path)}`
               const extensionIndex = file.name.lastIndexOf('.')
               const extension = extensionIndex > 0 ? file.name.slice(extensionIndex).toUpperCase() : ''
-              const displayName = extensionIndex > 0 ? file.name.slice(0, extensionIndex) : file.name
+              const originalDisplayName = extensionIndex > 0 ? file.name.slice(0, extensionIndex) : file.name
+              const displayName = mediaLabels[file.path] ?? originalDisplayName
               const fileDate = new Date(file.date)
               const formattedDate = Number.isNaN(fileDate.getTime())
                 ? t('noDate')
@@ -813,14 +999,46 @@ export default function ContentPage() {
                       </strong>
                       <span className="media-card-actions">
                         <button
+                          ref={(button) => {
+                            if (openMenuFor === file.path) menuButtonRef.current = button
+                          }}
                           className="icon-button"
                           type="button"
-                          onClick={() => handleOpenLocation(file.path)}
-                          aria-label={`${t('openLocation')}: ${file.name}`}
-                          title={t('openLocation')}
+                          onClick={(event) => toggleContentMenu(file, event.currentTarget)}
+                          aria-label={t('mediaActions', { file: file.name })}
+                          aria-haspopup="menu"
+                          aria-expanded={openMenuFor === file.path}
                         >
-                          <ExternalLink size={14} />
+                          <EllipsisVertical size={16} />
                         </button>
+                        {openMenuFor === file.path && menuPosition && createPortal(
+                          <div
+                            ref={menuRef}
+                            className="content-menu-list"
+                            role="menu"
+                            style={{ top: menuPosition.top, right: menuPosition.right }}
+                          >
+                            <button type="button" role="menuitem" onClick={() => {
+                              setOpenMenuFor(null)
+                              handleRenameMedia(file, originalDisplayName)
+                            }}>
+                              <FilePenLine size={15} />
+                              {t('rename')}
+                            </button>
+                            <button type="button" role="menuitem" onClick={() => void handleShowCollectionPicker(file)}>
+                              <Bookmark size={15} />
+                              {t('addToCollections')}
+                            </button>
+                            <button type="button" role="menuitem" onClick={() => {
+                              setOpenMenuFor(null)
+                              void handleOpenLocation(file.path)
+                            }}>
+                              <ExternalLink size={15} />
+                              {t('openLocation')}
+                            </button>
+                          </div>,
+                          document.body,
+                        )}
                         <span className="media-type" title={file.type}>
                           <MediaIcon size={15} />
                         </span>
@@ -946,6 +1164,71 @@ export default function ContentPage() {
             </div>
           )}
         </section>
+      )}
+
+      {collectionFile && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setCollectionFile(null)
+          }}
+        >
+          <section className="collection-dialog" role="dialog" aria-modal="true" aria-labelledby="collection-dialog-title">
+            <div className="collection-dialog-heading">
+              <div>
+                <h2 id="collection-dialog-title">{t('addToCollections')}</h2>
+                <p>{t('collectionReferencesDescription')}</p>
+              </div>
+              <button className="icon-button" type="button" onClick={() => setCollectionFile(null)} aria-label={t('cancel')}>
+                <X size={17} />
+              </button>
+            </div>
+            <div className="collection-choice-list">
+              {collections.map((collection) => {
+                const alreadyAdded = collection.files.includes(collectionFile.path)
+                const isFavourites = collection.name.toLowerCase() === 'favourites'
+                return (
+                  <div className="collection-choice" key={collection.name}>
+                    <span className="collection-choice-name">
+                      {isFavourites ? <Heart size={17} /> : <Folder size={17} />}
+                      {collection.name}
+                    </span>
+                    {alreadyAdded ? (
+                      <span className="collection-added" aria-label={t('alreadyInCollection')} title={t('alreadyInCollection')}>
+                        <Check size={16} />
+                        {t('alreadyInCollection')}
+                      </span>
+                    ) : (
+                      <button className="secondary-button collection-add-button" type="button" onClick={() => void handleAddMediaToCollection(collection.name)}>
+                        <Plus size={15} />
+                        {t('addToCollection')}
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+              {collections.length === 0 && <p className="collection-empty">{t('noCollections')}</p>}
+            </div>
+            {showNewCollection ? (
+              <form className="collection-create-form" onSubmit={handleCreateCollection}>
+                <input
+                  autoFocus
+                  value={newCollectionName}
+                  onChange={(event) => setNewCollectionName(event.target.value)}
+                  placeholder={t('collectionNamePlaceholder')}
+                  aria-label={t('collectionNamePlaceholder')}
+                  maxLength={80}
+                />
+                <button className="primary-button" type="submit">{t('createCollection')}</button>
+              </form>
+            ) : (
+              <button className="secondary-button collection-new-button" type="button" onClick={() => setShowNewCollection(true)}>
+                <Plus size={15} />
+                {t('newCollection')}
+              </button>
+            )}
+          </section>
+        </div>
       )}
 
       {selectedImage && (
